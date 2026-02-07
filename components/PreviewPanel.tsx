@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { CoverPageData, PageSize, TemplateType } from '../types';
 import { PAGE_DIMENSIONS } from '../constants';
 import { FileImage, FileOutput } from 'lucide-react';
@@ -19,21 +19,55 @@ const DetailRow: React.FC<{ label: string; value: string; fontSize: number }> = 
 );
 
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ data, previewRef }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
   const dimensions = PAGE_DIMENSIONS[data.pageSize];
+
+  // Logic to auto-scale the A4 preview to fit the container width
+  useEffect(() => {
+    const updateScale = () => {
+      if (containerRef.current) {
+        const containerWidth = containerRef.current.offsetWidth;
+        // Convert mm to pixels (approx 3.78px per mm)
+        const pageWidthPx = parseFloat(dimensions.width) * 3.78;
+        
+        if (containerWidth < pageWidthPx) {
+          const newScale = (containerWidth - 40) / pageWidthPx;
+          setScale(newScale);
+        } else {
+          setScale(1);
+        }
+      }
+    };
+
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, [dimensions.width]);
 
   const exportAsImage = async (format: 'png' | 'jpg') => {
     if (!previewRef.current) return;
-    const scale = 3; 
-    const canvas = await (window as any).html2canvas(previewRef.current, {
-      scale: scale,
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff'
-    });
-    const link = document.createElement('a');
-    link.download = `cover-page-${data.reportTitle.slice(0, 15)}.${format}`;
-    link.href = canvas.toDataURL(`image/${format === 'png' ? 'png' : 'jpeg'}`, format === 'jpg' ? 0.92 : 1);
-    link.click();
+    const originalScale = scale;
+    // Temporarily reset scale for high-res capture
+    setScale(1);
+    
+    // Use a small timeout to ensure DOM update
+    setTimeout(async () => {
+      const scaleFactor = 3; 
+      const canvas = await (window as any).html2canvas(previewRef.current, {
+        scale: scaleFactor,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      const link = document.createElement('a');
+      link.download = `cover-page-${data.reportTitle.slice(0, 15)}.${format}`;
+      link.href = canvas.toDataURL(`image/${format === 'png' ? 'png' : 'jpeg'}`, format === 'jpg' ? 0.92 : 1);
+      link.click();
+      
+      // Restore the visual scale
+      setScale(originalScale);
+    }, 100);
   };
 
   const exportAsDocx = async () => {
@@ -50,7 +84,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ data, previewRef }) => {
                 children: [new ImageRun({
                     data: buffer,
                     transformation: { width: 100, height: 100 },
-                })],
+                } as any)],
                 spacing: { after: 400 }
             }));
         } catch(e) {}
@@ -151,23 +185,23 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ data, previewRef }) => {
     switch(data.template) {
       case TemplateType.ACADEMIC:
         return {
-          header: "flex flex-row items-start gap-8 border-b-2 pb-6",
+          header: "flex flex-row items-start gap-4 md:gap-8 border-b-2 pb-6",
           headerTitle: "flex-1 text-left",
-          logoSize: "w-24 h-24",
+          logoSize: "w-16 h-16 md:w-24 md:h-24",
           accentLine: true
         };
       case TemplateType.MODERN:
         return {
           header: "flex flex-col items-start gap-4",
           headerTitle: "text-left border-l-4 pl-6",
-          logoSize: "w-16 h-16 absolute top-8 right-8",
+          logoSize: "w-12 h-12 md:w-16 md:h-16 absolute top-8 right-8",
           accentLine: false
         };
       default: // FORMAL
         return {
-          header: `flex flex-col items-center gap-6 ${data.alignment === 'left' ? 'items-start' : 'items-center'}`,
+          header: `flex flex-col items-center gap-4 md:gap-6 ${data.alignment === 'left' ? 'items-start' : 'items-center'}`,
           headerTitle: `w-full ${data.alignment === 'left' ? 'text-left' : 'text-center'}`,
-          logoSize: "w-32 h-32",
+          logoSize: "w-24 h-24 md:w-32 md:h-32",
           accentLine: true
         };
     }
@@ -176,110 +210,119 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ data, previewRef }) => {
   const styles = getTemplateStyles();
 
   return (
-    <div className="flex flex-col items-center gap-6 w-full max-w-full no-print pb-20">
-      <div className="flex flex-wrap items-center justify-center gap-2 bg-white/80 backdrop-blur-md p-3 rounded-2xl shadow-lg border border-white sticky top-0 z-10 w-full md:w-auto">
-        <span className="text-xs font-bold text-slate-400 uppercase px-2">Export As</span>
-        <button onClick={() => exportAsImage('png')} className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-black text-white rounded-xl text-sm transition-all shadow-md group">
-          <FileImage size={16} />
+    <div ref={containerRef} className="flex flex-col items-center gap-6 w-full max-w-full no-print pb-20">
+      {/* Export Toolbar */}
+      <div className="flex flex-wrap items-center justify-center gap-1.5 md:gap-2 bg-white/90 backdrop-blur-md p-2 rounded-xl shadow-lg border border-white sticky top-0 z-10 w-full md:w-auto">
+        <button onClick={() => exportAsImage('png')} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-black text-white rounded-lg text-xs md:text-sm transition-all group">
+          <FileImage size={14} />
           <span>PNG</span>
         </button>
-        <button onClick={() => exportAsImage('jpg')} className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-black text-white rounded-xl text-sm transition-all shadow-md group">
-          <FileImage size={16} />
+        <button onClick={() => exportAsImage('jpg')} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-black text-white rounded-lg text-xs md:text-sm transition-all group">
+          <FileImage size={14} />
           <span>JPG</span>
         </button>
-        <button onClick={exportAsDocx} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm transition-all shadow-md group">
-          <FileOutput size={16} />
-          <span>Word</span>
+        <button onClick={exportAsDocx} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs md:text-sm transition-all group">
+          <FileOutput size={14} />
+          <span>DOCX</span>
         </button>
       </div>
 
+      {/* Scaling Wrapper */}
       <div 
-        id="print-area"
-        ref={previewRef}
-        className="bg-white shadow-2xl overflow-hidden relative transition-all duration-300 flex flex-col"
         style={{ 
-          width: dimensions.width, 
-          height: dimensions.height,
-          padding: '25mm',
-          fontFamily: data.font,
-          color: '#1a1a1a',
-          boxSizing: 'border-box'
+          transform: `scale(${scale})`, 
+          transformOrigin: 'top center',
+          width: scale !== 1 ? 'auto' : dimensions.width,
+          height: scale !== 1 ? `${parseFloat(dimensions.height) * scale}mm` : dimensions.height,
+          transition: 'transform 0.2s ease-out'
         }}
       >
-        {/* Header Section */}
-        <div className={`${styles.header} relative mb-6`}>
-          {data.showLogo && data.universityLogo && (
-            <div className={styles.logoSize}>
-              <img src={data.universityLogo} alt="Logo" className="w-full h-full object-contain" />
-            </div>
-          )}
-          
-          <div className={`${styles.headerTitle} ${data.alignment === 'center' ? 'text-center' : 'text-left'}`} style={{ borderLeftColor: data.accentColor }}>
-            <h2 className="text-3xl font-bold uppercase tracking-tight leading-none mb-2" style={{ color: data.accentColor }}>
-              {data.universityName}
-            </h2>
-            <h3 className="text-xl font-medium text-slate-600">
-              {data.department}
-            </h3>
-          </div>
-        </div>
-
-        {styles.accentLine && (
-          <div className="h-[2px] w-full mb-8" style={{ background: `linear-gradient(90deg, ${data.accentColor}, transparent)` }} />
-        )}
-
-        {/* Middle Section - Centered Vertically */}
-        <div className={`flex-grow flex flex-col justify-center ${data.alignment === 'center' ? 'text-center' : 'text-left'}`}>
-          <p className="text-xl font-bold text-slate-400 tracking-[0.25em] uppercase mb-4">
-            {data.assignmentType}
-          </p>
-          <h1 
-            className="font-bold leading-tight" 
-            style={{ 
-              fontSize: `${data.titleFontSize}px`,
-              lineHeight: 1.2
-            }}
-          >
-            {data.reportTitle}
-          </h1>
-        </div>
-
-        {/* Details Section - Bottom */}
-        <div className="mt-12 space-y-2">
-          <div className="grid grid-cols-12 gap-y-3 pt-8 border-t-2" style={{ borderTopColor: '#f1f1f1' }}>
-            <DetailRow fontSize={data.detailsFontSize} label="Course Title" value={`${data.courseTitle} (${data.courseCode})`} />
-            <DetailRow fontSize={data.detailsFontSize} label="Submitted To" value={data.professorName} />
-            
-            {/* New Professor Designation Row */}
-            {data.professorDesignation && (
-              <DetailRow fontSize={data.detailsFontSize} label="Designation" value={data.professorDesignation} />
+        <div 
+          id="print-area"
+          ref={previewRef}
+          className="bg-white shadow-2xl overflow-hidden relative flex flex-col"
+          style={{ 
+            width: dimensions.width, 
+            height: dimensions.height,
+            padding: '25mm',
+            fontFamily: data.font,
+            color: '#1a1a1a',
+            boxSizing: 'border-box'
+          }}
+        >
+          {/* Header Section */}
+          <div className={`${styles.header} relative mb-6`}>
+            {data.showLogo && data.universityLogo && (
+              <div className={styles.logoSize}>
+                <img src={data.universityLogo} alt="Logo" className="w-full h-full object-contain" />
+              </div>
             )}
             
-            {/* Multiple Students Support */}
-            {data.students.map((student, index) => (
-               <DetailRow 
-                key={student.id} 
-                fontSize={data.detailsFontSize} 
-                label={index === 0 ? "Submitted By" : ""} 
-                value={`${student.name} (${student.studentId})`} 
-              />
-            ))}
-
-            <DetailRow fontSize={data.detailsFontSize} label="Session" value={data.session} />
-            <DetailRow fontSize={data.detailsFontSize} label="Submission Date" value={new Date(data.submissionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} />
-            {data.diagnosis && <DetailRow fontSize={data.detailsFontSize} label="Diagnosis / Group" value={data.diagnosis} />}
-            
-            {data.customFields.map(field => (
-              field.label && field.value && <DetailRow fontSize={data.detailsFontSize} key={field.id} label={field.label} value={field.value} />
-            ))}
+            <div className={`${styles.headerTitle} ${data.alignment === 'center' ? 'text-center' : 'text-left'}`} style={{ borderLeftColor: data.accentColor }}>
+              <h2 className="text-2xl md:text-3xl font-bold uppercase tracking-tight leading-none mb-2" style={{ color: data.accentColor }}>
+                {data.universityName}
+              </h2>
+              <h3 className="text-lg md:text-xl font-medium text-slate-600">
+                {data.department}
+              </h3>
+            </div>
           </div>
+
+          {styles.accentLine && (
+            <div className="h-[2px] w-full mb-8" style={{ background: `linear-gradient(90deg, ${data.accentColor}, transparent)` }} />
+          )}
+
+          {/* Middle Section - Centered Vertically */}
+          <div className={`flex-grow flex flex-col justify-center ${data.alignment === 'center' ? 'text-center' : 'text-left'}`}>
+            <p className="text-lg md:text-xl font-bold text-slate-400 tracking-[0.2em] uppercase mb-4">
+              {data.assignmentType}
+            </p>
+            <h1 
+              className="font-bold leading-tight" 
+              style={{ 
+                fontSize: `${data.titleFontSize}px`,
+                lineHeight: 1.2
+              }}
+            >
+              {data.reportTitle}
+            </h1>
+          </div>
+
+          {/* Details Section - Bottom */}
+          <div className="mt-8 md:mt-12 space-y-2">
+            <div className="grid grid-cols-12 gap-y-2 md:gap-y-3 pt-6 md:pt-8 border-t-2" style={{ borderTopColor: '#f1f1f1' }}>
+              <DetailRow fontSize={data.detailsFontSize} label="Course Title" value={`${data.courseTitle} (${data.courseCode})`} />
+              <DetailRow fontSize={data.detailsFontSize} label="Submitted To" value={data.professorName} />
+              
+              {data.professorDesignation && (
+                <DetailRow fontSize={data.detailsFontSize} label="Designation" value={data.professorDesignation} />
+              )}
+              
+              {data.students.map((student, index) => (
+                 <DetailRow 
+                  key={student.id} 
+                  fontSize={data.detailsFontSize} 
+                  label={index === 0 ? "Submitted By" : ""} 
+                  value={`${student.name} (${student.studentId})`} 
+                />
+              ))}
+
+              <DetailRow fontSize={data.detailsFontSize} label="Session" value={data.session} />
+              <DetailRow fontSize={data.detailsFontSize} label="Submission Date" value={new Date(data.submissionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} />
+              {data.diagnosis && <DetailRow fontSize={data.detailsFontSize} label="Diagnosis / Group" value={data.diagnosis} />}
+              
+              {data.customFields.map(field => (
+                field.label && field.value && <DetailRow fontSize={data.detailsFontSize} key={field.id} label={field.label} value={field.value} />
+              ))}
+            </div>
+          </div>
+
+          {data.showFooter && (
+            <div className="absolute bottom-6 md:bottom-8 left-0 w-full text-center text-[8px] md:text-[9px] text-slate-200 uppercase tracking-widest no-print">
+              Generated by CoverPage Pro
+            </div>
+          )}
         </div>
-
-        {data.showFooter && (
-          <div className="absolute bottom-8 left-0 w-full text-center text-[9px] text-slate-200 uppercase tracking-widest no-print">
-            Generated by CoverPage Pro
-          </div>
-        )}
       </div>
     </div>
   );

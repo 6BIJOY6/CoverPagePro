@@ -1,8 +1,8 @@
 
-import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { CoverPageData, PageSize, TemplateType } from '../types';
 import { PAGE_DIMENSIONS } from '../constants';
-import { FileImage, FileOutput, ZoomIn, ZoomOut, Maximize, Search, Loader2 } from 'lucide-react';
+import { FileOutput, ZoomIn, ZoomOut, Maximize, Loader2 } from 'lucide-react';
 import * as docx from 'docx';
 
 interface PreviewPanelProps {
@@ -10,241 +10,161 @@ interface PreviewPanelProps {
   previewRef: React.RefObject<HTMLDivElement>;
 }
 
-const DetailRow: React.FC<{ label: string; value: string; fontSize: number }> = ({ label, value, fontSize }) => (
-  <>
-    <div className="col-span-4 font-bold text-slate-700" style={{ fontSize: `${fontSize}px` }}>{label}</div>
-    <div className="col-span-1 text-center text-slate-300" style={{ fontSize: `${fontSize}px` }}>:</div>
-    <div className="col-span-7 font-medium text-slate-900" style={{ fontSize: `${fontSize}px` }}>{value}</div>
-  </>
-);
-
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ data, previewRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0.5); // Default to a visible middle-ground
+  const [scale, setScale] = useState(0.5);
   const [isAutoFit, setIsAutoFit] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const dimensions = PAGE_DIMENSIONS[data.pageSize];
 
   const calculateAutoFit = () => {
     if (containerRef.current && containerRef.current.offsetWidth > 0) {
       const containerWidth = containerRef.current.offsetWidth;
-      const horizontalPadding = window.innerWidth < 768 ? 32 : 80;
+      const horizontalPadding = window.innerWidth < 768 ? 24 : 64;
       const pageWidthPx = parseFloat(dimensions.width) * 3.78; 
-      
       const newScale = (containerWidth - horizontalPadding) / pageWidthPx;
-      return Math.max(0.2, Math.min(newScale, 1.1));
+      return Math.max(0.1, Math.min(newScale, 1.2));
     }
     return null;
   };
 
-  // Use ResizeObserver for more reliable dimension tracking (especially when switching tabs)
   useEffect(() => {
     if (!containerRef.current) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        if (entry.contentRect.width > 0 && isAutoFit) {
-          const newScale = calculateAutoFit();
-          if (newScale) {
-            setScale(newScale);
-            setIsInitializing(false);
-          }
-        }
+    const resizeObserver = new ResizeObserver(() => {
+      if (isAutoFit) {
+        const newScale = calculateAutoFit();
+        if (newScale) setScale(newScale);
       }
     });
-
     resizeObserver.observe(containerRef.current);
-    
-    // Initial calculation attempt
     const initial = calculateAutoFit();
-    if (initial) {
-      setScale(initial);
-      setIsInitializing(false);
-    }
-
+    if (initial) { setScale(initial); setIsInitializing(false); }
     return () => resizeObserver.disconnect();
   }, [dimensions.width, isAutoFit]);
 
   const handleManualZoom = (direction: 'in' | 'out') => {
     setIsAutoFit(false);
-    setScale(prev => {
-      const next = direction === 'in' ? prev + 0.1 : prev - 0.1;
-      return Math.max(0.15, Math.min(next, 2.0));
-    });
+    setScale(prev => Math.max(0.05, Math.min(direction === 'in' ? prev + 0.1 : prev - 0.1, 3.0)));
   };
 
   const toggleAutoFit = () => {
-    setIsAutoFit(true);
-    const newScale = calculateAutoFit();
-    if (newScale) setScale(newScale);
-  };
-
-  const exportAsImage = async (format: 'png' | 'jpg') => {
-    if (!previewRef.current) return;
-    const originalScale = scale;
-    const originalAutoFit = isAutoFit;
-    
-    setScale(1);
-    setIsAutoFit(false);
-    
-    setTimeout(async () => {
-      try {
-        const scaleFactor = 3; 
-        const canvas = await (window as any).html2canvas(previewRef.current, {
-          scale: scaleFactor,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-          windowWidth: parseFloat(dimensions.width) * 3.78,
-          windowHeight: parseFloat(dimensions.height) * 3.78
-        });
-        
-        const link = document.createElement('a');
-        link.download = `cover-page-${data.reportTitle.slice(0, 15)}.${format}`;
-        link.href = canvas.toDataURL(`image/${format === 'png' ? 'png' : 'jpeg'}`, format === 'jpg' ? 0.92 : 1);
-        link.click();
-      } catch (err) {
-        console.error("Export failed:", err);
-      } finally {
-        setScale(originalScale);
-        setIsAutoFit(originalAutoFit);
+    setIsAutoFit(prev => {
+      const next = !prev;
+      if (next) {
+        const fitScale = calculateAutoFit();
+        if (fitScale) setScale(fitScale);
       }
-    }, 200);
+      return next;
+    });
   };
 
   const exportAsDocx = async () => {
-    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, ImageRun, BorderStyle, VerticalAlign } = docx;
-
-    const children: any[] = [];
-
-    if (data.showLogo && data.universityLogo) {
-        try {
-            const base64Data = data.universityLogo.split(',')[1];
-            const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-            children.push(new Paragraph({
-                alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
-                children: [new ImageRun({
-                    data: buffer,
-                    transformation: { width: 100, height: 100 },
-                } as any)],
-                spacing: { after: 400 }
-            }));
-        } catch(e) {}
+    setIsExporting(true);
+    try {
+      const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, ImageRun, BorderStyle, VerticalAlign } = docx;
+      const children: any[] = [];
+      
+      if (data.showLogo && data.universityLogo) {
+          try {
+              const base64Data = data.universityLogo.split(',')[1];
+              const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+              children.push(new Paragraph({
+                  alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
+                  children: [new ImageRun({ data: buffer, transformation: { width: 100, height: 100 } } as any)],
+                  spacing: { after: 400 }
+              }));
+          } catch(e) {}
+      }
+      
+      children.push(new Paragraph({
+          alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
+          children: [new TextRun({ text: data.universityName, bold: true, size: 36, color: data.accentColor.replace('#', '') })],
+          spacing: { after: 100 }
+      }));
+      
+      if (data.department) {
+          children.push(new Paragraph({
+              alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
+              children: [new TextRun({ text: data.department, size: 24 })],
+              spacing: { after: 1200 }
+          }));
+      }
+      
+      children.push(new Paragraph({
+          alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
+          children: [new TextRun({ text: data.assignmentType.toUpperCase(), size: 28, bold: true, color: '666666' })],
+          spacing: { after: 200 }
+      }));
+      
+      children.push(new Paragraph({
+          alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
+          children: [new TextRun({ text: data.reportTitle, bold: true, size: data.titleFontSize * 2 })],
+          spacing: { after: 1500 }
+      }));
+      
+      const tableRows = [
+          ['Course', `${data.courseTitle} (${data.courseCode})`],
+          ['Submitted To', data.professorName],
+      ];
+      
+      if (data.professorDesignation) tableRows.push(['Designation', data.professorDesignation]);
+      data.students.forEach((s, i) => tableRows.push([i === 0 ? 'Submitted By' : '', `${s.name} (${s.studentId})`]));
+      tableRows.push(['Session', data.session]);
+      tableRows.push(['Date', data.submissionDate]);
+      if (data.diagnosis) tableRows.push(['Diagnosis/Group', data.diagnosis]);
+      data.customFields.forEach(f => tableRows.push([f.label, f.value]));
+      
+      const docxTable = new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE } },
+          rows: tableRows.map(row => new TableRow({
+              children: [
+                  new TableCell({ width: { size: 40, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row[0], bold: true, size: data.detailsFontSize * 2 })] })], verticalAlign: VerticalAlign.CENTER, borders: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'EEEEEE' } } }),
+                  new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row[1], size: data.detailsFontSize * 2 })] })], verticalAlign: VerticalAlign.CENTER, borders: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'EEEEEE' } } }),
+              ],
+          })),
+      });
+      
+      children.push(docxTable);
+      
+      const doc = new Document({ sections: [{ properties: { page: { size: { width: data.pageSize === PageSize.A4 ? 11906 : 12240, height: data.pageSize === PageSize.A4 ? 16838 : 15840 } } }, children: children }] });
+      const blob = await Packer.toBlob(doc);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `cover-page-${data.reportTitle.slice(0, 15).replace(/\s+/g, '-')}.docx`;
+      link.click();
+    } catch (err) {
+      console.error(err);
+      alert("DOCX generation failed.");
+    } finally {
+      setIsExporting(false);
     }
-
-    children.push(new Paragraph({
-        alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
-        children: [new TextRun({ text: data.universityName, bold: true, size: 36, color: data.accentColor.replace('#', '') })],
-        spacing: { after: 100 }
-    }));
-
-    if (data.department) {
-        children.push(new Paragraph({
-            alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
-            children: [new TextRun({ text: data.department, size: 24 })],
-            spacing: { after: 1200 }
-        }));
-    }
-
-    children.push(new Paragraph({
-        alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
-        children: [new TextRun({ text: data.assignmentType.toUpperCase(), size: 28, bold: true, color: '666666' })],
-        spacing: { after: 200 }
-    }));
-
-    children.push(new Paragraph({
-        alignment: data.alignment === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
-        children: [new TextRun({ text: data.reportTitle, bold: true, size: data.titleFontSize * 2 })],
-        spacing: { after: 1500 }
-    }));
-
-    const tableRows = [
-        ['Course', `${data.courseTitle} (${data.courseCode})`],
-        ['Submitted To', data.professorName],
-    ];
-
-    if (data.professorDesignation) {
-      tableRows.push(['Designation', data.professorDesignation]);
-    }
-
-    data.students.forEach((s, i) => {
-      tableRows.push([i === 0 ? 'Submitted By' : '', `${s.name} (${s.studentId})`]);
-    });
-
-    tableRows.push(['Session', data.session]);
-    tableRows.push(['Date', data.submissionDate]);
-
-    if (data.diagnosis) tableRows.push(['Diagnosis/Group', data.diagnosis]);
-    data.customFields.forEach(f => tableRows.push([f.label, f.value]));
-
-    const docxTable = new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        borders: {
-            top: { style: BorderStyle.NONE },
-            bottom: { style: BorderStyle.NONE },
-            left: { style: BorderStyle.NONE },
-            right: { style: BorderStyle.NONE },
-            insideHorizontal: { style: BorderStyle.NONE },
-            insideVertical: { style: BorderStyle.NONE },
-        },
-        rows: tableRows.map(row => new TableRow({
-            children: [
-                new TableCell({
-                    width: { size: 40, type: WidthType.PERCENTAGE },
-                    children: [new Paragraph({ children: [new TextRun({ text: row[0], bold: true, size: data.detailsFontSize * 2 })] })],
-                    verticalAlign: VerticalAlign.CENTER,
-                    borders: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'EEEEEE' } }
-                }),
-                new TableCell({
-                    width: { size: 60, type: WidthType.PERCENTAGE },
-                    children: [new Paragraph({ children: [new TextRun({ text: row[1], size: data.detailsFontSize * 2 })] })],
-                    verticalAlign: VerticalAlign.CENTER,
-                    borders: { bottom: { style: BorderStyle.SINGLE, size: 1, color: 'EEEEEE' } }
-                }),
-            ],
-        })),
-    });
-
-    children.push(docxTable);
-
-    const doc = new Document({
-        sections: [{
-            properties: {
-                page: { size: { width: data.pageSize === PageSize.A4 ? 11906 : 12240, height: data.pageSize === PageSize.A4 ? 16838 : 15840 } }
-            },
-            children: children,
-        }],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `cover-page-${data.reportTitle.slice(0, 15)}.docx`;
-    link.click();
   };
 
   const getTemplateStyles = () => {
+    const isCentered = data.alignment === 'center';
     switch(data.template) {
       case TemplateType.ACADEMIC:
         return {
-          header: "flex flex-row items-start gap-4 md:gap-8 border-b-2 pb-6",
-          headerTitle: "flex-1 text-left",
-          logoSize: "w-16 h-16 md:w-24 md:h-24",
-          accentLine: true
+          header: { display: 'block', borderBottom: `3px solid ${data.accentColor}`, paddingBottom: '30px', marginBottom: '50px', textAlign: data.alignment as any },
+          logo: { display: 'inline-block', width: '100px', height: '100px', marginRight: '30px', verticalAlign: 'middle' },
+          titles: { display: 'inline-block', verticalAlign: 'middle', width: 'calc(100% - 150px)' },
+          line: false
         };
       case TemplateType.MODERN:
         return {
-          header: "flex flex-col items-start gap-4",
-          headerTitle: "text-left border-l-4 pl-6",
-          logoSize: "w-12 h-12 md:w-16 md:h-16 absolute top-8 right-8",
-          accentLine: false
+          header: { display: 'block', borderLeft: `12px solid ${data.accentColor}`, paddingLeft: '40px', marginBottom: '60px', textAlign: 'left' as any },
+          logo: { position: 'absolute' as any, top: '100px', right: '100px', width: '85px', height: '85px' },
+          titles: { display: 'block' },
+          line: false
         };
       default: // FORMAL
         return {
-          header: `flex flex-col items-center gap-4 md:gap-6 ${data.alignment === 'left' ? 'items-start' : 'items-center'}`,
-          headerTitle: `w-full ${data.alignment === 'left' ? 'text-left' : 'text-center'}`,
-          logoSize: "w-24 h-24 md:w-32 md:h-32",
-          accentLine: true
+          header: { display: 'block', marginBottom: '60px', textAlign: data.alignment as any },
+          logo: { display: 'block', width: '150px', height: '150px', margin: isCentered ? '0 auto 30px auto' : '0 0 30px 0' },
+          titles: { display: 'block' },
+          line: true
         };
     }
   };
@@ -252,165 +172,128 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ data, previewRef }) => {
   const styles = getTemplateStyles();
 
   return (
-    <div ref={containerRef} className="flex flex-col items-center gap-4 md:gap-6 w-full h-full min-h-[500px] no-print pb-24 md:pb-10">
-      {/* Top Toolbar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full bg-white/90 backdrop-blur-xl p-3 md:p-4 rounded-2xl shadow-xl border border-white/20 sticky top-0 z-40 transition-all">
-        {/* Zoom Controls */}
-        <div className="flex items-center gap-1 md:gap-2 bg-slate-100/80 p-1 rounded-xl">
-          <button 
-            onClick={() => handleManualZoom('out')}
-            className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all text-slate-600 active:scale-95"
-            title="Zoom Out"
-          >
-            <ZoomOut size={18} />
-          </button>
-          <div className="flex items-center gap-1.5 px-2 min-w-[70px] justify-center select-none">
-            <span className="text-xs font-black text-slate-800 tracking-tighter">{Math.round(scale * 100)}%</span>
-          </div>
-          <button 
-            onClick={() => handleManualZoom('in')}
-            className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all text-slate-600 active:scale-95"
-            title="Zoom In"
-          >
-            <ZoomIn size={18} />
-          </button>
+    <div ref={containerRef} className="flex flex-col items-center gap-4 w-full h-full min-h-[400px] no-print pb-24 md:pb-10">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full bg-white/95 backdrop-blur-xl p-3 rounded-2xl shadow-xl border border-slate-200 sticky top-0 z-40">
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+          <button onClick={() => handleManualZoom('out')} className="p-2 hover:bg-white rounded-lg text-slate-600 transition-colors"><ZoomOut size={18} /></button>
+          <div className="px-2 min-w-[60px] text-center select-none font-bold text-slate-800 text-xs">{Math.round(scale * 100)}%</div>
+          <button onClick={() => handleManualZoom('in')} className="p-2 hover:bg-white rounded-lg text-slate-600 transition-colors"><ZoomIn size={18} /></button>
           <div className="w-px h-4 bg-slate-300 mx-1" />
-          <button 
-            onClick={toggleAutoFit}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-bold transition-all uppercase tracking-wider ${isAutoFit ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-600 hover:bg-white hover:shadow-sm'}`}
-          >
-            <Maximize size={14} />
-            <span>Fit Screen</span>
+          <button onClick={toggleAutoFit} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all uppercase tracking-wider ${isAutoFit ? 'bg-blue-600 text-white' : 'text-slate-600 bg-white'}`}>
+            <Maximize size={14} className="inline mr-1" /> Fit
           </button>
         </div>
-
-        {/* Export Options */}
-        <div className="flex items-center gap-1.5 md:gap-2">
-          <button onClick={() => exportAsImage('png')} className="flex items-center gap-1.5 px-3 md:px-4 py-2 bg-slate-800 hover:bg-black text-white rounded-xl text-xs md:text-sm font-bold transition-all shadow-md active:scale-95">
-            <FileImage size={16} />
-            <span>PNG</span>
-          </button>
-          <button onClick={() => exportAsImage('jpg')} className="flex items-center gap-1.5 px-3 md:px-4 py-2 bg-slate-800 hover:bg-black text-white rounded-xl text-xs md:text-sm font-bold transition-all shadow-md active:scale-95">
-            <FileImage size={16} />
-            <span>JPG</span>
-          </button>
-          <button onClick={exportAsDocx} className="flex items-center gap-1.5 px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs md:text-sm font-bold transition-all shadow-md active:scale-95">
-            <FileOutput size={16} />
-            <span>DOCX</span>
-          </button>
+        <div className="flex items-center gap-2">
+          {isExporting ? (
+            <div className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold animate-pulse flex items-center gap-2">
+              <Loader2 size={16} className="animate-spin" /> EXPORTING...
+            </div>
+          ) : (
+            <button 
+              onClick={exportAsDocx} 
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
+            >
+              <FileOutput size={16} /> DOWNLOAD DOCX
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Page Canvas Container */}
-      <div 
-        className="w-full flex-grow flex justify-center py-6 md:py-12 overflow-visible relative"
-        style={{ perspective: '2000px' }}
-      >
-        {isInitializing && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-50/50 z-10">
-            <Loader2 className="animate-spin text-blue-600" size={32} />
-            <p className="text-sm font-medium text-slate-500">Preparing Preview...</p>
-          </div>
-        )}
-
+      <div className="w-full flex-grow flex justify-center py-6 overflow-visible relative">
         <div 
-          className="relative origin-top transition-transform duration-500 ease-out"
+          className="relative transition-all duration-300 origin-top"
           style={{ 
             transform: `scale(${scale})`, 
             width: dimensions.width,
             height: dimensions.height,
-            marginBottom: `-${parseFloat(dimensions.height) * (1 - scale)}mm`, // Compensate for scaled height in flex container
-            imageRendering: 'auto',
-            textRendering: 'optimizeLegibility'
+            marginBottom: `calc(-1 * ${parseFloat(dimensions.height)}mm * (1 - ${scale}))`,
+            visibility: isInitializing ? 'hidden' : 'visible'
           }}
         >
           <div 
             id="print-area"
             ref={previewRef}
-            className="bg-white relative flex flex-col"
+            className="bg-white"
             style={{ 
               width: dimensions.width, 
               height: dimensions.height,
-              padding: '25mm',
+              padding: '30mm',
               fontFamily: data.font,
-              color: '#1a1a1a',
+              color: '#000',
               boxSizing: 'border-box',
-              boxShadow: '0 40px 100px -20px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0,0,0,0.05)',
-              border: '1px solid #ddd',
-              willChange: 'transform'
+              position: 'relative',
+              boxShadow: '0 40px 100px -20px rgba(0,0,0,0.1)',
+              border: '1px solid #eee'
             }}
           >
-            {/* Paper Subtle Finish */}
-            <div className="absolute inset-0 pointer-events-none opacity-[0.02] mix-blend-multiply" style={{ backgroundImage: 'url("https://www.transparenttextures.com/patterns/natural-paper.png")' }} />
-
-            {/* Header Section */}
-            <div className={`${styles.header} relative mb-8 z-10`}>
+            {/* Header Block */}
+            <div style={styles.header as any}>
               {data.showLogo && data.universityLogo && (
-                <div className={styles.logoSize}>
-                  <img src={data.universityLogo} alt="Logo" className="w-full h-full object-contain" />
+                <div style={styles.logo as any}>
+                  <img src={data.universityLogo} className="w-full h-full object-contain" crossOrigin="anonymous" />
                 </div>
               )}
-              
-              <div className={`${styles.headerTitle} ${data.alignment === 'center' ? 'text-center' : 'text-left'}`} style={{ borderLeftColor: data.accentColor }}>
-                <h2 className="text-2xl md:text-3xl font-bold uppercase tracking-tight leading-none mb-2" style={{ color: data.accentColor }}>
+              <div style={styles.titles as any}>
+                <div style={{ fontSize: '28px', fontWeight: 'bold', color: data.accentColor, textTransform: 'uppercase', lineHeight: '1.1', marginBottom: '10px' }}>
                   {data.universityName}
-                </h2>
-                <h3 className="text-lg md:text-xl font-medium text-slate-600">
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: '500', color: '#666', lineHeight: '1.2' }}>
                   {data.department}
-                </h3>
+                </div>
               </div>
             </div>
 
-            {styles.accentLine && (
-              <div className="h-[3px] w-full mb-10 relative z-10 rounded-full" style={{ background: `linear-gradient(90deg, ${data.accentColor}, transparent)` }} />
+            {styles.line && (
+              <div style={{ width: '100%', height: '4px', background: `linear-gradient(90deg, ${data.accentColor}, #eee)`, marginBottom: '50px', borderRadius: '4px' }} />
             )}
 
-            {/* Middle Section - Centered Vertically */}
-            <div className={`flex-grow flex flex-col justify-center relative z-10 ${data.alignment === 'center' ? 'text-center' : 'text-left'}`}>
-              <p className="text-xl md:text-2xl font-bold text-slate-400 tracking-[0.3em] uppercase mb-6">
+            {/* Title Section Block */}
+            <div style={{ width: '100%', marginTop: '60px', textAlign: data.alignment as any }}>
+              <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#999', textTransform: 'uppercase', letterSpacing: '0.4em', marginBottom: '40px' }}>
                 {data.assignmentType}
-              </p>
-              <h1 
-                className="font-bold leading-[1.15]" 
-                style={{ 
-                  fontSize: `${data.titleFontSize}px`,
-                }}
-              >
+              </div>
+              <div style={{ 
+                  fontSize: `${data.titleFontSize}px`, 
+                  fontWeight: 'bold', 
+                  color: '#000', 
+                  lineHeight: '1.3', 
+                  display: 'block',
+                  width: '100%',
+                  wordWrap: 'break-word'
+              }}>
                 {data.reportTitle}
-              </h1>
+              </div>
             </div>
 
-            {/* Details Section - Bottom */}
-            <div className="mt-8 md:mt-16 space-y-2 relative z-10">
-              <div className="grid grid-cols-12 gap-y-3 md:gap-y-5 pt-8 md:pt-12 border-t-[2px]" style={{ borderTopColor: '#f1f1f1' }}>
-                <DetailRow fontSize={data.detailsFontSize} label="Course Title" value={`${data.courseTitle} (${data.courseCode})`} />
-                <DetailRow fontSize={data.detailsFontSize} label="Submitted To" value={data.professorName} />
-                
-                {data.professorDesignation && (
-                  <DetailRow fontSize={data.detailsFontSize} label="Designation" value={data.professorDesignation} />
-                )}
-                
-                {data.students.map((student, index) => (
-                   <DetailRow 
-                    key={student.id} 
-                    fontSize={data.detailsFontSize} 
-                    label={index === 0 ? "Submitted By" : ""} 
-                    value={`${student.name} (${student.studentId})`} 
-                  />
-                ))}
-
-                <DetailRow fontSize={data.detailsFontSize} label="Session" value={data.session} />
-                <DetailRow fontSize={data.detailsFontSize} label="Submission Date" value={new Date(data.submissionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} />
-                {data.diagnosis && <DetailRow fontSize={data.detailsFontSize} label="Diagnosis / Group" value={data.diagnosis} />}
-                
-                {data.customFields.map(field => (
-                  field.label && field.value && <DetailRow fontSize={data.detailsFontSize} key={field.id} label={field.label} value={field.value} />
-                ))}
-              </div>
+            {/* Details Section Block - Using TABLE for ultimate stability */}
+            <div style={{ 
+                position: 'absolute', bottom: '30mm', left: '30mm', right: '30mm',
+                borderTop: '2px solid #eee', paddingTop: '40px'
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <tbody>
+                  {[
+                    ['Course Title', `${data.courseTitle} (${data.courseCode})`],
+                    ['Submitted To', data.professorName],
+                    ...(data.professorDesignation ? [['Designation', data.professorDesignation]] : []),
+                    ...data.students.map((s, i) => [i === 0 ? 'Submitted By' : '', `${s.name} (${s.studentId})`]),
+                    ['Session', data.session],
+                    ['Date', new Date(data.submissionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })],
+                    ...(data.diagnosis ? [['Group/ID', data.diagnosis]] : []),
+                    ...data.customFields.filter(f => f.label && f.value).map(f => [f.label, f.value])
+                  ].map((row, i) => (
+                    <tr key={i}>
+                      <td style={{ width: '35%', padding: '6px 0', verticalAlign: 'top', fontSize: `${data.detailsFontSize}px`, fontWeight: 'bold', color: '#444' }}>{row[0]}</td>
+                      <td style={{ width: '5%', padding: '6px 0', verticalAlign: 'top', fontSize: `${data.detailsFontSize}px`, color: '#ccc', textAlign: 'center' }}>{row[0] ? ':' : ''}</td>
+                      <td style={{ width: '60%', padding: '6px 0', verticalAlign: 'top', fontSize: `${data.detailsFontSize}px`, fontWeight: '500', color: '#000' }}>{row[1]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
             {data.showFooter && (
-              <div className="absolute bottom-8 md:bottom-10 left-0 w-full text-center text-[9px] md:text-[11px] text-slate-300 font-bold uppercase tracking-[0.4em] no-print opacity-60">
+              <div style={{ position: 'absolute', bottom: '12mm', left: 0, width: '100%', textAlign: 'center', fontSize: '11px', color: '#ddd', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.6em' }}>
                 Generated with CoverPage Pro
               </div>
             )}
